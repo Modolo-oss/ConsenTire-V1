@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+target/
+*.jar
+
+# Build outputs
+dist/
+build/
+*.class
+*.log
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage/
+.nyc_output/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Scala
+metagraph/target/
+*.sbt-build/
+
+# Replit
+replit.md
+attached_assets/

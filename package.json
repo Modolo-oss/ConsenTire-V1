@@ -1,0 +1,29 @@
+{
+  "name": "consentire",
+  "version": "1.0.0",
+  "description": "GDPR Consent Dynamic Ledger - Zero-knowledge consent management on Constellation Hypergraph",
+  "workspaces": [
+    "frontend",
+    "backend",
+    "shared"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && PORT=3001 npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build": "npm run build:shared && npm run build:backend && npm run build:frontend",
+    "build:shared": "cd shared && npm run build",
+    "build:backend": "cd backend && npm run build",
+    "build:frontend": "cd frontend && npm run build",
+    "start": "concurrently \"npm run start:backend\" \"npm run start:frontend\"",
+    "start:backend": "cd backend && PORT=3001 npm run start",
+    "start:frontend": "cd frontend && npm run start"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@noble/hashes": "^2.0.1"
+  }
+}

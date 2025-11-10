@@ -1,0 +1,51 @@
+[build]
+builder = "dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "always"
+
+[[services]]
+name = "consentire-frontend"
+source = "Dockerfile.frontend"
+
+[services.variables]
+NEXT_PUBLIC_API_URL = "${{BACKEND_URL}}"
+NEXT_PUBLIC_METAGRAPH_URL = "${{METAGRAPH_URL}}"
+NEXT_PUBLIC_ENV = "production"
+
+[[services]]
+name = "consentire-backend"
+source = "Dockerfile.backend"
+
+[services.variables]
+PORT = "3001"
+DATABASE_URL = "${{DATABASE_URL}}"
+REDIS_URL = "${{REDIS_URL}}"
+METAGRAPH_L0_URL = "${{METAGRAPH_URL}}"
+JWT_SECRET = "${{JWT_SECRET}}"
+NODE_ENV = "production"
+
+[[services]]
+name = "consentire-metagraph"
+source = "Dockerfile.metagraph"
+
+[services.variables]
+CL_APP_ENV = "prod"
+CL_PUBLIC_HTTP_PORT = "9200"
+CL_P2P_HTTP_PORT = "9201"
+CL_CLI_HTTP_PORT = "9202"
+CL_KEYSTORE = "/app/certs/node1.p12"
+CL_KEYALIAS = "node1"
+CL_PASSWORD = "${{NODE_PASSWORD}}"
+CL_COLLATERAL = "0"
+
+[[services]]
+name = "postgres"
+source = "postgres:15"
+
+[services.variables]
+POSTGRES_DB = "consentire_prod"
+POSTGRES_USER = "consentire"
+POSTGRES_PASSWORD = "${{POSTGRES_PASSWORD}}"

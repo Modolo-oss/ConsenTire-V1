@@ -7,6 +7,7 @@ import { logger } from '../utils/logger';
 import { IBlockchainAnchorService } from './IBlockchainAnchorService';
 import { realHGTPService } from './realHGTPService';
 import { mockHGTPService } from './mockHGTPService';
+import { digitalEvidenceService } from './digitalEvidenceService';
 
 /**
  * Blockchain Service Factory
@@ -17,42 +18,50 @@ class BlockchainServiceFactory {
   private isDemoMode: boolean;
 
   constructor() {
-    // DEMO MODE ONLY - Real blockchain adapter not yet implemented
-    // This facade provides the abstraction layer for easy future integration
-    
-    const hasDigitalEvidenceKey = !!process.env.DIGITAL_EVIDENCE_API_KEY;
+    const hasDigitalEvidenceKey = !!(
+      process.env.DIGITAL_EVIDENCE_API_KEY &&
+      process.env.DIGITAL_EVIDENCE_ORG_ID &&
+      process.env.DIGITAL_EVIDENCE_TENANT_ID
+    );
     const hasConstellationCreds = !!(
       process.env.CONSTELLATION_PRIVATE_KEY && 
       process.env.CONSTELLATION_PUBLIC_KEY && 
       process.env.CONSTELLATION_WALLET_ADDRESS
     );
 
-    // TODO: Implement Digital Evidence API adapter
-    // When implemented, uncomment this section:
-    /*
+    // Priority 1: Digital Evidence API (recommended for production)
     if (hasDigitalEvidenceKey) {
-      this.service = new DigitalEvidenceService();
-      this.isDemoMode = false;
-      logger.info('✅ Using Digital Evidence API for real blockchain anchoring');
-      return;
+      try {
+        this.service = digitalEvidenceService;
+        this.isDemoMode = false;
+        logger.info('✅ Using Digital Evidence API for REAL blockchain anchoring', {
+          mode: 'REAL',
+          service: 'DigitalEvidenceService',
+          endpoint: 'https://de-api.constellationnetwork.io/v1'
+        });
+        return;
+      } catch (error: any) {
+        logger.error('Failed to initialize Digital Evidence Service, falling back to mock mode', {
+          error: error.message
+        });
+      }
     }
-    */
 
-    // Current: ALWAYS use mock for hackathon demo
-    if (hasDigitalEvidenceKey) {
-      logger.warn('⚠️  Digital Evidence API key detected but adapter NOT IMPLEMENTED - using mock mode');
-    }
+    // Priority 2: Direct Constellation Network (requires custom metagraph)
     if (hasConstellationCreds) {
-      logger.warn('⚠️  Constellation credentials configured but /data endpoint requires custom metagraph - using mock mode');
+      logger.warn('⚠️  Constellation credentials configured but /data endpoint requires custom metagraph - using mock mode', {
+        note: 'Use Digital Evidence API for production blockchain anchoring'
+      });
     }
     
+    // Fallback: Mock mode for demo/testing
     this.service = mockHGTPService;
     this.isDemoMode = true;
 
-    logger.info('🎭 Blockchain service initialized in DEMO MODE ONLY', {
+    logger.info('🎭 Blockchain service initialized in DEMO MODE', {
       mode: 'MOCK (deterministic simulation)',
       service: 'MockHGTPService',
-      note: 'Real blockchain adapter not yet implemented'
+      note: 'Configure Digital Evidence API credentials for real blockchain anchoring'
     });
   }
 

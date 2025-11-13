@@ -167,17 +167,20 @@ class DigitalEvidenceService implements IBlockchainAnchorService {
   ): Promise<FingerprintResponse> {
     const proof = this.signFingerprintValue(fingerprintValue);
     
+    // Calculate hash of FingerprintValue for metadata
+    const canonical = this.canonicalJSON(fingerprintValue);
+    const fingerprintHash = bytesToHex(sha256(new TextEncoder().encode(canonical)));
+    
     const submission: FingerprintSubmission = {
       attestation: {
         content: fingerprintValue,
         proofs: [proof]
+      },
+      metadata: {
+        hash: fingerprintHash,
+        tags: tags || {}
       }
     };
-    
-    // Only add metadata if tags are provided
-    if (tags && Object.keys(tags).length > 0) {
-      (submission as any).metadata = { tags };
-    }
 
     const payload = {
       fingerprints: [submission]

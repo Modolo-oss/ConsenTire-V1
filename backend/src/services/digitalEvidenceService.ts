@@ -15,7 +15,7 @@ import {
 import { IBlockchainAnchorService, BlockchainNetworkStatus } from './IBlockchainAnchorService';
 import { createHash } from 'crypto';
 import * as secp256k1 from '@noble/secp256k1';
-import { sha256 } from '@noble/hashes/sha2.js';
+import { sha256, sha512 } from '@noble/hashes/sha2.js';
 import { hmac } from '@noble/hashes/hmac.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import canonicalize from 'canonicalize';
@@ -121,16 +121,89 @@ class DigitalEvidenceService implements IBlockchainAnchorService {
   }
 
   /**
-   * Sign fingerprint value using SECP256K1
+   * Convert ECDSA signature (r, s) to DER format
+   */
+  private signatureToDER(r: bigint, s: bigint): Uint8Array {
+    const rBytes = this.bigintToBytes(r);
+    const sBytes = this.bigintToBytes(s);
+    
+    // DER format: 0x30 [total-length] 0x02 [r-length] [r] 0x02 [s-length] [s]
+    const totalLength = 2 + rBytes.length + 2 + sBytes.length;
+    const der = new Uint8Array(2 + totalLength);
+    
+    let offset = 0;
+    der[offset++] = 0x30; // SEQUENCE
+    der[offset++] = totalLength;
+    der[offset++] = 0x02; // INTEGER (r)
+    der[offset++] = rBytes.length;
+    der.set(rBytes, offset);
+    offset += rBytes.length;
+    der[offset++] = 0x02; // INTEGER (s)
+    der[offset++] = sBytes.length;
+    der.set(sBytes, offset);
+    
+    return der;
+  }
+
+  /**
+   * Convert bigint to bytes with proper padding for DER
+   */
+  private bigintToBytes(n: bigint): Uint8Array {
+    let hex = n.toString(16);
+    if (hex.length % 2) hex = '0' + hex;
+    
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+    }
+    
+    // Add 0x00 prefix if high bit is set (DER requirement)
+    if (bytes[0] & 0x80) {
+      const padded = new Uint8Array(bytes.length + 1);
+      padded[0] = 0x00;
+      padded.set(bytes, 1);
+      return padded;
+    }
+    
+    return bytes;
+  }
+
+  /**
+   * Sign fingerprint value using SECP256K1_RFC8785_V1
+   * 
+   * Per Digital Evidence API spec:
+   * 1. RFC 8785 canonicalize content
+   * 2. SHA-256 hash
+   * 3. Convert hash to hex string → treat as UTF-8 bytes
+   * 4. SHA-512 hash
+   * 5. Truncate to 32 bytes
+   * 6. Sign with secp256k1
    */
   private signFingerprintValue(fingerprintValue: FingerprintValue): SignatureProof {
+    // Step 1: RFC 8785 canonical JSON
     const canonical = this.canonicalJSON(fingerprintValue);
-    const messageHash = sha256(new TextEncoder().encode(canonical));
-    const signature = secp256k1.sign(messageHash, this.privateKey);
+    
+    // Step 2: SHA-256 hash
+    const firstHash = sha256(new TextEncoder().encode(canonical));
+    
+    // Step 3: Convert hash to hex string
+    const hashHex = bytesToHex(firstHash);
+    
+    // Step 4: Treat hex string as UTF-8 bytes and SHA-512 hash
+    const secondHash = sha512(new TextEncoder().encode(hashHex));
+    
+    // Step 5: Truncate to 32 bytes
+    const messageToSign = secondHash.slice(0, 32);
+    
+    // Step 6: Sign with secp256k1
+    const signature = secp256k1.sign(messageToSign, this.privateKey);
+    
+    // Convert to DER format
+    const derSignature = this.signatureToDER(signature.r, signature.s);
 
     return {
-      id: bytesToHex(this.publicKey),
-      signature: signature.toCompactHex(),
+      id: bytesToHex(this.publicKey), // Uncompressed public key (04 + X + Y)
+      signature: bytesToHex(derSignature), // DER-encoded signature (per API spec)
       algorithm: 'SECP256K1_RFC8785_V1'
     };
   }
@@ -200,14 +273,17 @@ class DigitalEvidenceService implements IBlockchainAnchorService {
         responseData: JSON.stringify(response.data, null, 2)
       });
 
-      const result = response.data.results?.[0];
-      if (!result || !result.accepted) {
+      // API returns array directly (not wrapped in { results: [...] })
+      const results = Array.isArray(response.data) ? response.data : [response.data];
+      const result = results[0];
+      
+      if (!result || result.accepted !== true) {
         logger.error('Fingerprint submission rejected by API', {
-          result: JSON.stringify(result || response.data, null, 2),
+          result: JSON.stringify(result, null, 2),
           accepted: result?.accepted,
-          error: result?.error
+          errors: result?.errors
         });
-        throw new Error(`Fingerprint submission rejected: ${result?.error || JSON.stringify(result || 'Unknown error')}`);
+        throw new Error(`Fingerprint submission rejected: ${result?.errors?.join(', ') || 'Unknown error'}`);
       }
 
       logger.info('✅ Fingerprint submitted to blockchain', {
@@ -216,9 +292,17 @@ class DigitalEvidenceService implements IBlockchainAnchorService {
         documentId: fingerprintValue.documentId
       });
 
-      // Fetch full fingerprint details
-      const detailResponse = await this.client.get(`/fingerprints/${result.hash}`);
-      return detailResponse.data;
+      // Return minimal fingerprint response (skip detailed fetch to avoid timestamp parsing issues)
+      return {
+        hash: result.hash,
+        fingerprintTimestamp: fingerprintValue.timestamp,
+        status: 'accepted',
+        organizationId: fingerprintValue.orgId,
+        tenantId: fingerprintValue.tenantId,
+        documentId: fingerprintValue.documentId,
+        eventId: fingerprintValue.eventId,
+        documentRef: fingerprintValue.documentRef
+      };
 
     } catch (error: any) {
       logger.error('Failed to submit fingerprint to Digital Evidence API', {

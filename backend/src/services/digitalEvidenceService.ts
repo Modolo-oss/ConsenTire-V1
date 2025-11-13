@@ -142,7 +142,8 @@ class DigitalEvidenceService implements IBlockchainAnchorService {
     consentState: ConsentState,
     eventType: string
   ): FingerprintValue {
-    const eventId = `${eventType}-${consentState.consentId}-${Date.now()}`;
+    // Generate proper UUIDv4 for eventId (required by Digital Evidence API spec)
+    const eventId = crypto.randomUUID();
     const documentRef = cryptoService.hash(
       `${consentState.userId}:${consentState.controllerHash}:${consentState.purposeHash}`
     );
@@ -182,20 +183,31 @@ class DigitalEvidenceService implements IBlockchainAnchorService {
       }
     };
 
-    const payload = {
-      fingerprints: [submission]
-    };
+    // Digital Evidence API expects array directly (not wrapped in object)
+    const payload = [submission];
 
     logger.info('Submitting fingerprint to Digital Evidence API', {
-      payload: JSON.stringify(payload, null, 2)
+      eventId: fingerprintValue.eventId,
+      documentId: fingerprintValue.documentId,
+      payloadSize: JSON.stringify(payload).length
     });
 
     try {
       const response = await this.client.post('/fingerprints', payload);
 
+      logger.info('Digital Evidence API response received', {
+        statusCode: response.status,
+        responseData: JSON.stringify(response.data, null, 2)
+      });
+
       const result = response.data.results?.[0];
       if (!result || !result.accepted) {
-        throw new Error(`Fingerprint submission rejected: ${result?.error || 'Unknown error'}`);
+        logger.error('Fingerprint submission rejected by API', {
+          result: JSON.stringify(result || response.data, null, 2),
+          accepted: result?.accepted,
+          error: result?.error
+        });
+        throw new Error(`Fingerprint submission rejected: ${result?.error || JSON.stringify(result || 'Unknown error')}`);
       }
 
       logger.info('✅ Fingerprint submitted to blockchain', {

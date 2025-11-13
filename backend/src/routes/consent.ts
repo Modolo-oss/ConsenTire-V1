@@ -17,6 +17,27 @@ import { cryptoService, SignatureAlgorithm } from '../services/cryptoService';
 
 export const consentRouter = Router();
 
+// SECURITY: In-memory nonce store to prevent signature replay attacks
+// Production should use Redis or database with TTL
+interface NonceEntry {
+  signature: string;
+  timestamp: number;
+}
+
+const usedSignatures = new Map<string, NonceEntry>();
+
+// Cleanup expired nonces every minute
+setInterval(() => {
+  const now = Date.now();
+  const maxAge = 5 * 60 * 1000; // 5 minutes
+  
+  for (const [key, entry] of usedSignatures.entries()) {
+    if (now - entry.timestamp > maxAge) {
+      usedSignatures.delete(key);
+    }
+  }
+}, 60 * 1000);
+
 /**
  * POST /api/v1/consent/grant
  * Grant consent (requires authentication)
@@ -96,61 +117,130 @@ consentRouter.post('/revoke/:consentId', authenticateUser, async (req: Request, 
       } as APIError);
     }
 
-    // Reconstruct the message that was signed
-    const message = JSON.stringify({
-      action: 'revoke_consent',
-      consentId,
-      userId,
-      timestamp
-    });
+    // SECURITY: Enforce timestamp freshness (prevent replay attacks)
+    const now = Date.now();
+    const requestTimestamp = parseInt(timestamp);
+    const maxAge = 5 * 60 * 1000; // 5 minutes
 
-    // SECURITY FIX: Fetch user's stored public key from database (don't trust client)
-    const user = await authService.getUserById(userId);
-    if (!user || !user.public_key) {
-      return res.status(401).json({
-        code: 'MISSING_PUBLIC_KEY',
-        message: 'User public key not found. Please log in again to generate signing keys.',
-        timestamp: Date.now()
+    if (isNaN(requestTimestamp)) {
+      return res.status(400).json({
+        code: 'INVALID_TIMESTAMP',
+        message: 'Timestamp must be a valid number',
+        timestamp: now
       } as APIError);
     }
 
-    // Verify Ed25519 signature using STORED public key (not client-supplied)
-    const verificationResult = await cryptoService.verifySignature(
-      message,
-      signature,
-      user.public_key,  // SECURITY: This comes from database, not from client
-      SignatureAlgorithm.ED25519
-    );
-
-    if (!verificationResult.isValid) {
-      logger.warn('Invalid signature for revoke consent', {
+    if (Math.abs(now - requestTimestamp) > maxAge) {
+      logger.warn('Timestamp outside acceptable window', {
         userId,
         consentId,
-        signatureProvided: signature.substring(0, 16) + '...',
-        storedPublicKey: user.public_key.substring(0, 16) + '...'
+        requestTimestamp,
+        now,
+        difference: Math.abs(now - requestTimestamp)
       });
       return res.status(401).json({
-        code: 'INVALID_SIGNATURE',
-        message: 'Invalid cryptographic signature. Request denied.',
-        timestamp: Date.now()
+        code: 'TIMESTAMP_EXPIRED',
+        message: 'Request timestamp too old or too far in future. Please try again.',
+        timestamp: now
       } as APIError);
     }
 
-    logger.info('✅ Signature verified successfully for revoke consent', {
-      userId,
-      consentId,
-      algorithm: 'Ed25519',
-      publicKeyUsed: user.public_key.substring(0, 16) + '...'
+    // SECURITY: ATOMIC check-and-set to prevent replay attacks
+    // CRITICAL: Must set IMMEDIATELY after check (NO awaits between) to prevent race conditions
+    if (usedSignatures.has(signature)) {
+      logger.warn('Signature already used - replay attack detected', {
+        userId,
+        consentId,
+        signaturePrefix: signature.substring(0, 16) + '...',
+        originalTimestamp: usedSignatures.get(signature)?.timestamp
+      });
+      return res.status(401).json({
+        code: 'SIGNATURE_REPLAY',
+        message: 'This signature has already been used. Replay attack prevented.',
+        timestamp: now
+      } as APIError);
+    }
+
+    // ATOMIC: Reserve signature IMMEDIATELY (before any await)
+    // NOTE: In-memory store clears on process restart. Production should use Redis with SETNX.
+    usedSignatures.set(signature, {
+      signature,
+      timestamp: now
     });
 
-    const request: ConsentRevokeRequest = {
-      consentId,
-      userId,
-      signature
-    };
+    // From this point forward, if any validation fails, we must remove the signature to allow retry
+    try {
+      // Reconstruct the message that was signed
+      const messagePayload = {
+        action: 'revoke_consent',
+        consentId,
+        userId,
+        timestamp: requestTimestamp
+      };
+      const message = JSON.stringify(messagePayload);
 
-    const result = await pgConsentService.revokeConsent(request, userId);
-    res.json(result);
+      // SECURITY FIX: Fetch user's stored public key from database (don't trust client)
+      const user = await authService.getUserById(userId);
+      if (!user || !user.public_key) {
+        usedSignatures.delete(signature); // Allow retry if key not found
+        return res.status(401).json({
+          code: 'MISSING_PUBLIC_KEY',
+          message: 'User public key not found. Please log in again to generate signing keys.',
+          timestamp: now
+        } as APIError);
+      }
+
+      // Verify Ed25519 signature using STORED public key (not client-supplied)
+      const verificationResult = await cryptoService.verifySignature(
+        message,
+        signature,
+        user.public_key,  // SECURITY: This comes from database, not from client
+        SignatureAlgorithm.ED25519
+      );
+
+      if (!verificationResult.isValid) {
+        usedSignatures.delete(signature); // Allow retry if signature invalid
+        logger.warn('Invalid signature for revoke consent', {
+          userId,
+          consentId,
+          signatureProvided: signature.substring(0, 16) + '...',
+          storedPublicKey: user.public_key.substring(0, 16) + '...'
+        });
+        return res.status(401).json({
+          code: 'INVALID_SIGNATURE',
+          message: 'Invalid cryptographic signature. Request denied.',
+          timestamp: now
+        } as APIError);
+      }
+
+      logger.info('✅ Signature verified successfully for revoke consent', {
+        userId,
+        consentId,
+        algorithm: 'Ed25519',
+        publicKeyUsed: user.public_key.substring(0, 16) + '...'
+      });
+
+      // Execute revocation
+      const request: ConsentRevokeRequest = {
+        consentId,
+        userId,
+        signature
+      };
+
+      const result = await pgConsentService.revokeConsent(request, userId);
+      
+      logger.info('✅ Consent revoked successfully', {
+        userId,
+        consentId,
+        signatureStored: true
+      });
+      
+      res.json(result);
+    } catch (error: any) {
+      // If ANY validation or revocation fails, remove signature to allow retry
+      usedSignatures.delete(signature);
+      throw error;
+    }
   } catch (error: any) {
     logger.error('Error revoking consent', { error: error.message });
     res.status(500).json({

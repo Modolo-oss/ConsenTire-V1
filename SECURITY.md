@@ -205,7 +205,102 @@ app.use(helmet({
 
 ---
 
-### 5. CSRF Protection
+### 5. Replay Attack Protection
+
+**Risk Level:** 🟢 **MITIGATED (with limitations)**
+
+**Implementation:**
+
+ConsenTide implements multi-layer replay attack protection for consent revocation:
+
+1. **Timestamp Freshness Validation**
+   - Maximum age: 5 minutes (configurable)
+   - Prevents replay of old signatures
+   - Enforced before signature verification
+
+2. **Nonce Tracking (In-Memory)**
+   - Each signature can only be used once
+   - Stored in Map<signature, {signature, timestamp}>
+   - TTL cleanup removes expired entries every minute
+
+3. **Atomic Signature Reservation**
+   - Signature stored BEFORE database revocation
+   - If revocation fails, signature is removed (allows retry)
+   - Prevents concurrent replay attacks
+
+**Code Example:**
+```typescript
+// backend/src/routes/consent.ts
+
+// In-memory nonce store
+const usedSignatures = new Map<string, NonceEntry>();
+
+// Check for replay
+if (usedSignatures.has(signature)) {
+  return res.status(401).json({
+    code: 'SIGNATURE_REPLAY',
+    message: 'This signature has already been used.'
+  });
+}
+
+// Store signature BEFORE revoke (atomic reservation)
+usedSignatures.set(signature, { signature, timestamp: now });
+
+try {
+  await revokeConsent(...);
+} catch (error) {
+  // Remove on failure to allow retry
+  usedSignatures.delete(signature);
+  throw error;
+}
+```
+
+**Limitations (Hackathon Demo):**
+
+⚠️ **In-Memory Storage:**
+- Nonce store clears on process restart
+- Replays possible after server restart (within timestamp window)
+- Production must use Redis/database with persistence
+
+⚠️ **Concurrent Requests:**
+- Sub-millisecond race conditions theoretically possible
+- Unlikely in demo environment (single user)
+- Production needs atomic database operations (unique constraints)
+
+⚠️ **No Distributed Coordination:**
+- Single-server implementation only
+- Multiple backend instances would need shared nonce store
+- Production requires Redis cluster or distributed database
+
+**Production Recommendations:**
+
+```typescript
+// Use Redis with atomic operations
+const redis = new Redis(process.env.REDIS_URL);
+
+// Atomic check-and-set with expiry
+const wasUsed = await redis.set(
+  `nonce:${signature}`,
+  timestamp,
+  'EX', 300,  // 5 minute TTL
+  'NX'        // Only if not exists
+);
+
+if (!wasUsed) {
+  throw new Error('SIGNATURE_REPLAY');
+}
+```
+
+**Attack Scenarios Prevented:**
+
+✅ **Captured Signature Replay:** Blocked by nonce tracking  
+✅ **Timestamp Manipulation:** Blocked by 5-minute window  
+✅ **Concurrent Replays:** Blocked by atomic reservation  
+⚠️ **Post-Restart Replay:** Possible (in-memory limitation)  
+
+---
+
+### 6. CSRF Protection
 
 **Current State:** 🟡 **PARTIAL**
 

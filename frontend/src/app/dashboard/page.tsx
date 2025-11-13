@@ -725,11 +725,11 @@ function ConsentCard({
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-violet-300 mb-0.5">Blockchain Anchored</p>
                   <a 
-                    href={`https://be.constellationnetwork.io/mainnet/transactions/${consent.hgtpTxHash}`}
+                    href={`https://digitalevidence.constellationnetwork.io/fingerprint/${consent.hgtpTxHash}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs text-violet-400 hover:text-violet-300 hover:underline font-mono truncate block flex items-center gap-1"
-                    title={`View on Constellation Explorer: ${consent.hgtpTxHash}`}
+                    title={`View on Digital Evidence Explorer: ${consent.hgtpTxHash}`}
                   >
                     {consent.hgtpTxHash.substring(0, 20)}...
                     <ArrowUpRightIcon className="h-3 w-3 flex-shrink-0" />

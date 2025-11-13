@@ -24,6 +24,12 @@ import {
   LegalBasis
 } from '@/lib/types'
 import { DemoModeBanner } from '@/components/DemoModeBanner'
+import {
+  getPrivateKey,
+  signMessage,
+  createRevokeConsentMessage,
+  hasSigningKeys
+} from '@/lib/crypto'
 
 type TabType = 'consents' | 'organizations' | 'settings' | 'export'
 
@@ -145,13 +151,33 @@ export default function Dashboard() {
     
     setLoading(true)
     try {
+      // Get private key from sessionStorage
+      const privateKey = getPrivateKey()
+      
+      if (!privateKey || !userId) {
+        alert('Cryptographic signing keys not found. Please log in again.')
+        setLoading(false)
+        return
+      }
+
+      // Create standardized message for signing
+      const timestamp = Date.now()
+      const message = createRevokeConsentMessage(consentId, userId, timestamp)
+
+      // Sign message with Ed25519 private key
+      const signatureResult = await signMessage(message, privateKey)
+
+      // Send signed revoke request to backend
+      // SECURITY: Public key is fetched from database, not sent from client
       await api.post(`/consent/revoke/${consentId}`, {
         userId,
-        signature: `sig_${Date.now()}`
+        signature: signatureResult.signature,
+        timestamp
       })
+      
       await loadConsents()
       await loadOrganizations()
-      alert('Consent revoked successfully!')
+      alert('Consent revoked successfully! ✓ Signed with Ed25519 signature')
     } catch (error: any) {
       alert(`Failed to revoke consent: ${error.response?.data?.message || error.message}`)
     } finally {

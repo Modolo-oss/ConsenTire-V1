@@ -12,6 +12,12 @@ import {
   CheckBadgeIcon
 } from '@heroicons/react/24/outline'
 import { api } from '@/lib/api'
+import {
+  generateKeyPair,
+  storePrivateKey,
+  storePublicKey,
+  hasSigningKeys
+} from '@/lib/crypto'
 
 // Background texture component matching homepage
 function BackgroundTexture() {
@@ -66,6 +72,25 @@ export default function LoginPage() {
       if (response.data.success) {
         localStorage.setItem('token', response.data.token)
         localStorage.setItem('user', JSON.stringify(response.data.user))
+        
+        // Generate Ed25519 keypair for cryptographic signing
+        // Private key stays in sessionStorage (cleared on tab close)
+        // Public key sent to backend for signature verification
+        try {
+          const keypair = await generateKeyPair()
+          storePrivateKey(keypair.privateKey)
+          storePublicKey(keypair.publicKey)
+          
+          // Send public key to backend
+          await api.post('/auth/update-public-key', {
+            publicKey: keypair.publicKey
+          })
+          
+          console.log('🔐 Signing keypair generated successfully')
+        } catch (keyError) {
+          console.warn('Failed to generate signing keypair:', keyError)
+          // Non-fatal error - user can still use app, just can't sign transactions
+        }
         
         const role = response.data.user.role
         if (role === 'regulator') {
@@ -133,6 +158,24 @@ export default function LoginPage() {
             <p className="text-slate-400">
               Sign in to access your consent dashboard
             </p>
+          </div>
+
+          {/* Security Warning Banner */}
+          <div className="mb-6 rounded-2xl border border-amber-500/30 bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-transparent p-4 backdrop-blur-sm">
+            <div className="flex items-start gap-3">
+              <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-amber-500/20 flex-shrink-0 mt-0.5">
+                <svg className="h-4 w-4 text-amber-400" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-amber-300 mb-1.5">🔒 Hackathon Demo - Security Notice</h3>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Cryptographic signing keys are generated client-side and stored in <span className="font-mono bg-black/30 px-1 py-0.5 rounded text-amber-200">sessionStorage</span> for demo purposes. 
+                  Keys are destroyed when you close this tab. <span className="font-semibold text-amber-200">Do not use production data or reuse keys.</span> This implementation demonstrates Ed25519 signatures but requires additional hardening for production use (WebCrypto non-extractable keys, hardware security modules).
+                </p>
+              </div>
+            </div>
           </div>
 
           {/* Demo Accounts Card */}

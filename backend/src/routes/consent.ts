@@ -12,6 +12,8 @@ import {
 import { pgConsentService } from '../services/pgConsentService';
 import { authenticateUser, optionalAuth } from '../middleware/supabaseAuth';
 import { logger } from '../utils/logger';
+import { authService } from '../services/authService';
+import { cryptoService, SignatureAlgorithm } from '../services/cryptoService';
 
 export const consentRouter = Router();
 
@@ -83,16 +85,63 @@ consentRouter.get('/verify/:userId/:controllerId/:purpose', async (req: Request,
 consentRouter.post('/revoke/:consentId', authenticateUser, async (req: Request, res: Response) => {
   try {
     const { consentId } = req.params;
-    const { signature } = req.body;
-    const userId = req.user!.id; // From Supabase auth middleware
+    const { signature, timestamp } = req.body;  // SECURITY FIX: Don't accept publicKey from client
+    const userId = req.user!.id; // From auth middleware
     
-    if (!signature) {
+    if (!signature || !timestamp) {
       return res.status(400).json({
         code: 'VALIDATION_ERROR',
-        message: 'Missing required field: signature',
+        message: 'Missing required fields: signature and timestamp',
         timestamp: Date.now()
       } as APIError);
     }
+
+    // Reconstruct the message that was signed
+    const message = JSON.stringify({
+      action: 'revoke_consent',
+      consentId,
+      userId,
+      timestamp
+    });
+
+    // SECURITY FIX: Fetch user's stored public key from database (don't trust client)
+    const user = await authService.getUserById(userId);
+    if (!user || !user.public_key) {
+      return res.status(401).json({
+        code: 'MISSING_PUBLIC_KEY',
+        message: 'User public key not found. Please log in again to generate signing keys.',
+        timestamp: Date.now()
+      } as APIError);
+    }
+
+    // Verify Ed25519 signature using STORED public key (not client-supplied)
+    const verificationResult = await cryptoService.verifySignature(
+      message,
+      signature,
+      user.public_key,  // SECURITY: This comes from database, not from client
+      SignatureAlgorithm.ED25519
+    );
+
+    if (!verificationResult.isValid) {
+      logger.warn('Invalid signature for revoke consent', {
+        userId,
+        consentId,
+        signatureProvided: signature.substring(0, 16) + '...',
+        storedPublicKey: user.public_key.substring(0, 16) + '...'
+      });
+      return res.status(401).json({
+        code: 'INVALID_SIGNATURE',
+        message: 'Invalid cryptographic signature. Request denied.',
+        timestamp: Date.now()
+      } as APIError);
+    }
+
+    logger.info('✅ Signature verified successfully for revoke consent', {
+      userId,
+      consentId,
+      algorithm: 'Ed25519',
+      publicKeyUsed: user.public_key.substring(0, 16) + '...'
+    });
 
     const request: ConsentRevokeRequest = {
       consentId,

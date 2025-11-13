@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import bcrypt from 'bcryptjs';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { logger } from '../utils/logger';
+import { cryptoService, SignatureAlgorithm } from './cryptoService';
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -24,7 +25,9 @@ export interface AuthResponse {
     role: string;
     did: string;
     organizationId?: string;
+    publicKey?: string;
   };
+  privateKey?: string;
   message?: string;
 }
 
@@ -140,6 +143,22 @@ export class AuthService {
     } catch (error) {
       logger.error('Error fetching user:', error);
       return null;
+    }
+  }
+
+  async updatePublicKey(userId: string, publicKey: string): Promise<boolean> {
+    try {
+      const result = await pool.query(
+        `UPDATE users 
+         SET public_key = $1, updated_at = NOW()
+         WHERE id = $2`,
+        [publicKey, userId]
+      );
+
+      return result.rowCount !== null && result.rowCount > 0;
+    } catch (error) {
+      logger.error('Error updating public key:', error);
+      return false;
     }
   }
 }

@@ -7,48 +7,77 @@ import { logger } from '../utils/logger.js';
 import { IBlockchainAnchorService } from './IBlockchainAnchorService.js';
 import { realHGTPService } from './realHGTPService.js';
 import { mockHGTPService } from './mockHGTPService.js';
+import { createDigitalEvidenceService } from './digitalEvidenceService.js';
 
 /**
  * Blockchain Service Factory
- * Routes blockchain operations to real or mock implementation
+ * Auto-detects credentials and routes to appropriate blockchain service:
+ * 1. Digital Evidence API (if API_KEY + ORG_ID + TENANT_ID configured)
+ * 2. Constellation HGTP (if PRIVATE_KEY + PUBLIC_KEY + WALLET_ADDRESS configured)
+ * 3. Mock Service (fallback for demo mode)
  * 
- * NOTE: Digital Evidence API adapter exists but not currently integrated.
- * See PROJECT_DESCRIPTION.md for successful blockchain anchoring examples.
  * Blockchain hash verification: https://digitalevidence.constellationnetwork.io/fingerprint/[hash]
  */
 class BlockchainServiceFactory {
   private service: IBlockchainAnchorService;
   private isDemoMode: boolean;
+  private activeServiceName: string;
 
   constructor() {
-    const hasDigitalEvidenceKey = !!process.env.DIGITAL_EVIDENCE_API_KEY;
+    const hasDigitalEvidenceKey = !!(
+      process.env.DIGITAL_EVIDENCE_API_KEY &&
+      process.env.DIGITAL_EVIDENCE_ORG_ID &&
+      process.env.DIGITAL_EVIDENCE_TENANT_ID
+    );
+    
     const hasConstellationCreds = !!(
       process.env.CONSTELLATION_PRIVATE_KEY && 
       process.env.CONSTELLATION_PUBLIC_KEY && 
       process.env.CONSTELLATION_WALLET_ADDRESS
     );
 
-    // HACKATHON DEMO: Using mock for deterministic behavior
-    // Digital Evidence API integration completed and tested separately
+    // Priority 1: Digital Evidence API (preferred for GDPR consent anchoring)
     if (hasDigitalEvidenceKey) {
-      logger.info('✅ Digital Evidence API credentials configured', {
-        note: 'Mock mode active for demo consistency',
-        verifyAt: 'https://digitalevidence.constellationnetwork.io/fingerprint/[hash]'
-      });
+      try {
+        this.service = createDigitalEvidenceService();
+        this.isDemoMode = false;
+        this.activeServiceName = 'DigitalEvidenceService';
+        
+        logger.info('🔗 DigitalEvidenceService initialized - REAL BLOCKCHAIN MODE', {
+          service: 'Digital Evidence API',
+          mode: 'PRODUCTION',
+          explorer: 'https://digitalevidence.constellationnetwork.io/fingerprint/[hash]'
+        });
+        return;
+      } catch (error: any) {
+        logger.error('❌ Failed to initialize Digital Evidence service, falling back to mock', {
+          error: error.message
+        });
+      }
     }
     
+    // Priority 2: Constellation HGTP (direct blockchain integration)
     if (hasConstellationCreds) {
-      logger.info('✅ Constellation credentials configured', {
-        note: 'Mock mode active for demo consistency'
+      this.service = realHGTPService;
+      this.isDemoMode = false;
+      this.activeServiceName = 'RealHGTPService';
+      
+      logger.info('🔗 RealHGTPService initialized - REAL BLOCKCHAIN MODE', {
+        service: 'Constellation HGTP',
+        mode: 'PRODUCTION',
+        explorer: 'https://be.constellationnetwork.io/mainnet/transactions/[hash]'
       });
+      return;
     }
     
+    // Priority 3: Mock Service (demo/testing)
     this.service = mockHGTPService;
     this.isDemoMode = true;
+    this.activeServiceName = 'MockHGTPService';
 
-    logger.info('🎭 MockHGTPService initialized - DEMO MODE', {
-      message: 'Deterministic blockchain simulation for hackathon demo.',
-      note: 'Real blockchain integration tested and documented in PROJECT_DESCRIPTION.md'
+    logger.warn('🎭 MockHGTPService initialized - DEMO MODE', {
+      message: 'No blockchain credentials configured. Using deterministic mock for demo.',
+      note: 'Configure DIGITAL_EVIDENCE_API_KEY or CONSTELLATION credentials for real blockchain'
     });
   }
 
@@ -71,6 +100,13 @@ class BlockchainServiceFactory {
    */
   getMode(): 'real' | 'mock' {
     return this.isDemoMode ? 'mock' : 'real';
+  }
+
+  /**
+   * Get active service name
+   */
+  getActiveServiceName(): string {
+    return this.activeServiceName;
   }
 }
 

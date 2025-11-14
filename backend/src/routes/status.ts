@@ -4,7 +4,7 @@
  */
 
 import express, { Request, Response } from 'express';
-import { blockchainService, isDemoMode, blockchainMode } from '../services/blockchainFacade';
+import { blockchainService, isDemoMode, blockchainMode, activeServiceName } from '../services/blockchainFacade';
 import { logger } from '../utils/logger';
 
 const router = express.Router();
@@ -22,10 +22,11 @@ router.get('/', async (req: Request, res: Response) => {
       blockchain: {
         mode: blockchainMode,
         isDemo: isDemoMode,
+        activeService: activeServiceName,
         networkStatus,
         message: isDemoMode 
           ? 'Running in DEMO mode - blockchain operations are simulated. Configure Digital Evidence API credentials to enable real blockchain anchoring.'
-          : 'Connected to real blockchain network'
+          : `Connected to real blockchain network via ${activeServiceName}`
       },
       database: {
         connected: true,

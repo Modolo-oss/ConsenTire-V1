@@ -36,6 +36,8 @@ class BlockchainServiceFactory {
       process.env.CONSTELLATION_WALLET_ADDRESS
     );
 
+    const allowMockFallback = process.env.ALLOW_MOCK_FALLBACK === 'true';
+
     // Priority 1: Digital Evidence API (preferred for GDPR consent anchoring)
     if (hasDigitalEvidenceKey) {
       try {
@@ -50,7 +52,24 @@ class BlockchainServiceFactory {
         });
         return;
       } catch (error: any) {
-        logger.error('❌ Failed to initialize Digital Evidence service, falling back to mock', {
+        const errorMsg = `Failed to initialize Digital Evidence service: ${error.message}`;
+        logger.error('❌ Digital Evidence initialization failed', {
+          error: error.message,
+          hasCredentials: true,
+          allowFallback: allowMockFallback
+        });
+
+        // HARD FAIL if credentials present but initialization failed (unless explicit override)
+        if (!allowMockFallback) {
+          logger.error('🚨 FATAL: Digital Evidence credentials configured but service failed to initialize', {
+            error: errorMsg,
+            solution: 'Fix Digital Evidence credentials or set ALLOW_MOCK_FALLBACK=true to use mock mode'
+          });
+          throw new Error(`Blockchain initialization failed: ${errorMsg}. Set ALLOW_MOCK_FALLBACK=true to allow mock fallback.`);
+        }
+
+        logger.warn('⚠️ FALLING BACK TO MOCK MODE (ALLOW_MOCK_FALLBACK=true)', {
+          reason: 'Digital Evidence service initialization failed',
           error: error.message
         });
       }
@@ -116,6 +135,7 @@ const factory = new BlockchainServiceFactory();
 export const blockchainService = factory.getService();
 export const isDemoMode = factory.isDemo();
 export const blockchainMode = factory.getMode();
+export const activeServiceName = factory.getActiveServiceName();
 
 // Export factory for testing
 export { BlockchainServiceFactory };

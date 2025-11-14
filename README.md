@@ -3,14 +3,14 @@
 **Zero-knowledge GDPR consent management with immutable audit trails and dynamic revocation capabilities**
 
 [![Security](https://img.shields.io/badge/Security-Ed25519%20Signatures-blue?logo=lock)](./SECURITY.md)
-[![Demo](https://img.shields.io/badge/Status-Demo%20Mode-yellow)](./README.md)
+[![Blockchain](https://img.shields.io/badge/Blockchain-Configured-orange)](https://digitalevidence.constellationnetwork.io)
 [![Documentation](https://img.shields.io/badge/Security%20Docs-Complete-informational)](./SECURITY.md)
 
-> **⚡ Current Status:** Demo mode with deterministic mock blockchain for hackathon consistency. Real Digital Evidence API integration was tested separately (blockchain hashes available for verification). Dashboard links to Constellation Network's blockchain explorer.
+> **🔗 Blockchain Status:** Digital Evidence API credentials configured and service initialized. System ready for real blockchain anchoring via Constellation Network. Actual API endpoint requires verification during first submission.
 
 ## 🎯 Overview
 
-ConsenTide is a privacy-first consent ledger that lets users grant, monitor, and revoke data-processing permissions across any organization—without exposing personal data. Features Ed25519 cryptographic signatures, atomic replay attack protection, and GDPR-compliant audit trails.
+ConsenTide is a privacy-first consent ledger that lets users grant, monitor, and revoke data-processing permissions across any organization—without exposing personal data. Features Ed25519 cryptographic signatures, atomic replay attack protection, and blockchain-ready architecture with Digital Evidence API integration.
 
 ## 🏗️ Architecture
 
@@ -384,10 +384,11 @@ ConsenTide is a privacy-first consent ledger that lets users grant, monitor, and
 - ✅ **Input Validation** – Zod schemas for all API endpoints
 
 ### Blockchain Integration
-- 🎭 **Mock Blockchain (Current)** – Deterministic TX hashes for demo consistency
-- ✅ **Digital Evidence Explorer** – Dashboard links to [Constellation Network blockchain explorer](https://digitalevidence.constellationnetwork.io)
-- ✅ **Immutable Audit Trail** – Every consent action logged with transaction hash
-- 📋 **Real Integration Tested** – Digital Evidence API successfully tested in separate environment (architecture ready)
+- 🔧 **Digital Evidence API Ready** – Service configured with API credentials (endpoint verification pending)
+- ✅ **Auto-Detection** – Switches between real/mock based on available credentials
+- ✅ **Blockchain Explorer** – Dashboard links to [Constellation Network explorer](https://digitalevidence.constellationnetwork.io/fingerprint/[hash])
+- ✅ **Audit Trail Architecture** – Transaction hash logging ready for blockchain anchoring
+- ⚠️ **Status Note** – First consent submission will verify API endpoint compatibility
 
 ### Database & Infrastructure
 - ✅ **Production PostgreSQL** – Native Replit database with native `pg` driver
